@@ -27,21 +27,53 @@ def construct_db(file_in="health.sqlite", file_out="daily_health.sqlite",
         raise Exception("No {} file in the working directory. This needs to be obtained as an export from the Pebble app".format(file_in))
 
     # Create a database connection
-    with sqlite3.connect('health.sqlite') as conn:
-        conn.row_factory = sqlite3.Row
-        c = conn.cursor()
+    with sqlite3.connect(file_in) as in_conn, sqlite3.connect(file_out) as out_conn:
+        in_conn.row_factory = sqlite3.Row
+        in_c = in_conn.cursor()
+        out_c = out_conn.cursor()
+
+        # Check if the output databse exists already
+        out_c.execute("""SELECT
+                             name
+                         FROM sqlite_master
+                         WHERE
+                             type='table'
+                             AND name='days_summary'""")
+        if out_c.fetchone() is not None and not overwrite:
+            raise Exception("Database {} has already been configured. Pass overwrite=True as an argument to replace it.".format(file_out))
+        else:
+            out_c.execute("""DROP TABLE IF EXISTS 'days_summary'""")
+            out_c.execute("""CREATE TABLE 'days_summary' (
+                                 'id'  INTEGER PRIMARY KEY AUTOINCREMENT UNIQUE,
+                                 'step_count'  REAL,
+                                 'distance' REAL,
+                                 'active_minutes'  INTEGER,
+                                 'sleep'   INTEGER,
+                                 'deep_sleep'  INTEGER,
+                                 'nap' INTEGER,
+                                 'deep_nap' INTEGER,
+                                 'active_gcal' REAL,
+                                 'resting_gcal' REAL,
+                                 'charging_time'   INTEGER,
+                                 'avg_movement_vmc' REAL,
+                                 'avg_light'   REAL
+                             )""")
+            out_conn.commit()
 
         # Establish the first and last days stored in the db
-        c.execute("""SELECT
+        # Minute samples seem to be stored only for the last year...
+        in_c.execute("""SELECT
                          MIN(date_local_secs) AS min_date,
                          MAX(date_local_secs) AS max_date
                      FROM minute_samples""")
-        row1 = c.fetchone()
-        c.execute("""SELECT
+        row1 = in_c.fetchone()
+        # ...but activity sessions are stored forever.
+        # Combining both allows establishing the whole range of dates stored.
+        in_c.execute("""SELECT
                          MIN(start_local_secs) AS min_date,
                          MAX(end_local_secs) AS max_date
                      FROM activity_sessions""")
-        row2 = c.fetchone()
+        row2 = in_c.fetchone()
         date_min = row1["min_date"] if row1["min_date"] < row2["min_date"] else row2["min_date"]
         date_max = row1["max_date"] if row1["max_date"] > row2["min_date"] else row2["max_date"]
         date_min = _unix_to_date(date_min)
