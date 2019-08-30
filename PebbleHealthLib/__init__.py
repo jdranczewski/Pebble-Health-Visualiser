@@ -1,5 +1,6 @@
 import sqlite3
-from datetime import date
+import time
+from datetime import date, timedelta
 from os import path
 
 
@@ -79,8 +80,33 @@ def construct_db(file_in="health.sqlite", file_out="daily_health.sqlite",
         date_min = _unix_to_date(date_min)
         date_max = _unix_to_date(date_max)
 
-        print(date_min, date_max)
+        # Go through all dates and collect aggregate data
+        date_i = date_min
+        while date_i <= date_max:
+            date_i_next = date_i + timedelta(days=1)
+
+            # First compile the minute data into some sums and averages
+            in_c.execute("""SELECT
+                              SUM(step_count) AS steps,
+                              SUM(active_minutes) AS active_minutes,
+                              SUM(active_gcal) AS active_gcal,
+                              SUM(resting_gcal) AS resting_gcal,
+                              SUM(plugged_in) AS charging_time,
+                              AVG(vmc) AS avg_movement_vmc,
+                              AVG(light) AS avg_light
+                          FROM minute_samples
+                          WHERE
+                              date_local_secs > ?
+                              AND date_local_secs <= ?
+            """, (_datetime_to_unix(date_i), _datetime_to_unix(date_i_next)))
+            row_minutes = in_c.fetchone()
+
+            date_i = date_i_next
 
 
 def _unix_to_date(unix):
     return date.fromtimestamp(unix)
+
+
+def _datetime_to_unix(dt):
+    return int(time.mktime(dt.timetuple()))
