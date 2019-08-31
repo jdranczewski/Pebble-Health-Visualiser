@@ -46,18 +46,19 @@ def construct_db(file_in="health.sqlite", file_out="daily_health.sqlite",
             out_c.execute("""DROP TABLE IF EXISTS 'days_summary'""")
             out_c.execute("""CREATE TABLE 'days_summary' (
                                  'id'  INTEGER PRIMARY KEY AUTOINCREMENT UNIQUE,
-                                 'step_count'  REAL,
-                                 'distance' REAL,
-                                 'active_minutes'  INTEGER,
-                                 'sleep'   INTEGER,
-                                 'deep_sleep'  INTEGER,
+                                 'date_unix' INTEGER UNIQUE,
+                                 'date_text' TEXT UNIQUE,
+                                 'step_count' REAL,
+                                 'distance_m' REAL,
+                                 'active_minutes' INTEGER,
+                                 'sleep' INTEGER,
+                                 'deep_sleep' INTEGER,
                                  'nap' INTEGER,
                                  'deep_nap' INTEGER,
                                  'active_gcal' REAL,
                                  'resting_gcal' REAL,
-                                 'charging_time'   INTEGER,
                                  'avg_movement_vmc' REAL,
-                                 'avg_light'   REAL
+                                 'avg_light' REAL
                              )""")
             out_conn.commit()
 
@@ -82,16 +83,17 @@ def construct_db(file_in="health.sqlite", file_out="daily_health.sqlite",
 
         # Go through all dates and collect aggregate data
         date_i = date_min
+        data = []
         while date_i <= date_max:
             date_i_next = date_i + timedelta(days=1)
 
             # First compile the minute data into some sums and averages
             in_c.execute("""SELECT
-                              SUM(step_count) AS steps,
+                              SUM(step_count) AS step_count,
+                              SUM(distance_mm) AS distance_mm,
                               SUM(active_minutes) AS active_minutes,
                               SUM(active_gcal) AS active_gcal,
                               SUM(resting_gcal) AS resting_gcal,
-                              SUM(plugged_in) AS charging_time,
                               AVG(vmc) AS avg_movement_vmc,
                               AVG(light) AS avg_light
                           FROM minute_samples
@@ -101,7 +103,32 @@ def construct_db(file_in="health.sqlite", file_out="daily_health.sqlite",
             """, (_datetime_to_unix(date_i), _datetime_to_unix(date_i_next)))
             row_minutes = in_c.fetchone()
 
+            distance_m = None if row_minutes["distance_mm"] is None else row_minutes["distance_mm"]*1e-3
+            data.append((_datetime_to_unix(date_i),
+                         date_i.strftime("%d-%m-%Y"),
+                         row_minutes["step_count"],
+                         distance_m,
+                         row_minutes["active_minutes"],
+                         row_minutes["active_gcal"],
+                         row_minutes["resting_gcal"],
+                         row_minutes["avg_movement_vmc"],
+                         row_minutes["avg_light"]))
+
             date_i = date_i_next
+        # Commit all the details to the out db
+        out_c.executemany("""INSERT INTO days_summary(
+                                 'date_unix',
+                                 'date_text',
+                                 'step_count',
+                                 'distance_m',
+                                 'active_minutes',
+                                 'active_gcal',
+                                 'resting_gcal',
+                                 'avg_movement_vmc',
+                                 'avg_light'
+                             ) VALUES ("""
+                          + ",".join(["?"]*len(data[0])) + ")", data)
+        out_conn.commit()
 
 
 def _unix_to_date(unix):
